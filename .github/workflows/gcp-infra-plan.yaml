@@ -1,0 +1,87 @@
+name: GCP Infra Plan
+
+env:
+  PROJECT_ID: TBD
+  GCP_SERVICE_ACCOUNT_DEV: ${{ secrets.GCP_SERVICE_ACCOUNT_DEV }}
+  GCP_SERVICE_ACCOUNT_PROD: ${{ secrets.GCP_SERVICE_ACCOUNT_PROD }}
+  GCP_WIF_PROVIDER_DEV: ${{ secrets.GCP_WIF_PROVIDER_DEV }}
+  GCP_WIF_PROVIDER_PROD: ${{ secrets.GCP_WIF_PROVIDER_PROD }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
+
+      region:
+        description: 'Region to deploy'
+        required: true
+        type: choice
+        options:
+          - us-central1
+        default: us-central1
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  infra-plan:
+    runs-on: ubuntu-latest
+    name: GCP Infra Plan ${{ inputs.environment || 'dev' }} in ${{ inputs.region || 'us-central1' }}
+    env:
+      ENVIRONMENT: ${{ inputs.environment || 'dev' }}
+      REGION: ${{ inputs.region || 'us-central1' }}
+    defaults:
+      run:
+        working-directory: gcp/${{ env.REGION }}/compute-ansible/${{ env.ENVIRONMENT }}
+
+    steps:
+
+    - uses: actions/checkout@v4
+
+    - name: Set secret name
+      id: secret-name
+      run: |
+        if [ "${{ env.ENVIRONMENT }}" == "dev" ]; then
+          echo "service_account=${{ env.GCP_SERVICE_ACCOUNT_DEV }}" >> $GITHUB_OUTPUT
+          echo "wif_provider=${{ env.GCP_WIF_PROVIDER_DEV }}" >> $GITHUB_OUTPUT
+        else
+          echo "service_account=${{ env.GCP_SERVICE_ACCOUNT_PROD }}" >> $GITHUB_OUTPUT
+          echo "wif_provider=${{ env.GCP_WIF_PROVIDER_PROD }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Configure GCP Credentials
+      id: gcp-auth
+      uses: google-github-actions/auth@v2
+      with:
+        project_id: ${{ env.PROJECT_ID }}
+        workload_identity_provider: ${{ steps.secret-name.outputs.wif_provider }}
+        service_account: ${{ steps.secret-name.outputs.service_account }}
+        create_credentials_file: true
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.12.2
+        terraform_wrapper: false
+
+    - name: Install Terragrunt
+      run: |
+        curl -L "https://github.com/gruntwork-io/terragrunt/releases/download/v0.81.10/terragrunt_linux_amd64" -o terragrunt
+        chmod +x terragrunt
+        sudo mv terragrunt /usr/local/bin/
+        terragrunt --version
+
+    - name: Terragrunt Plan
+      run: |
+        terragrunt init --all --non-interactive -upgrade
+        terragrunt plan --all --non-interactive
+      env:
+        GOOGLE_APPLICATION_CREDENTIALS: ${{ steps.gcp-auth.outputs.credentials_file_path }}

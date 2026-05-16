@@ -1,0 +1,88 @@
+name: Azure Infra Plan
+
+env:
+  AZURE_CLIENT_ID_DEV: ${{ vars.AZURE_CLIENT_ID_DEV }}
+  AZURE_TENANT_ID_DEV: ${{ vars.AZURE_TENANT_ID_DEV }}
+  AZURE_SUBSCRIPTION_ID_DEV: ${{ vars.AZURE_SUBSCRIPTION_ID_DEV }}
+  AZURE_CLIENT_ID_STAGE: ${{ vars.AZURE_CLIENT_ID_STAGE }}
+  AZURE_TENANT_ID_STAGE: ${{ vars.AZURE_TENANT_ID_STAGE }}
+  AZURE_SUBSCRIPTION_ID_STAGE: ${{ vars.AZURE_SUBSCRIPTION_ID_STAGE }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      account:
+        description: 'Account to deploy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - stage
+        default: dev
+
+      cluster:
+        description: 'Versionmesh deployment'
+        required: true
+        type: choice
+        options:
+          - bluemesh
+        default: bluemesh
+
+      region:
+        description: 'Region to deploy'
+        required: true
+        type: choice
+        options:
+          - eastus
+          - eastus2
+        default: eastus
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  infra-plan:
+    runs-on: ubuntu-latest
+    env:
+      ACCOUNT: ${{ inputs.account || 'dev' }}
+      CLUSTER: ${{ inputs.cluster || 'bluemesh' }}
+      REGION: ${{ inputs.region || 'eastus' }}
+      ARM_USE_OIDC: "true"
+      ARM_USE_AZUREAD: "true"
+
+    concurrency:
+      group: azure-${{ inputs.account || 'dev' }}-${{ inputs.region || 'eastus' }}-${{ inputs.cluster || 'bluemesh' }}
+      cancel-in-progress: true
+
+    steps:
+
+    - uses: actions/checkout@v4
+
+    - name: Set Azure credentials for account
+      run: |
+        SUFFIX=$(echo "${{ env.ACCOUNT }}" | tr '[:lower:]' '[:upper:]')
+        eval "echo ARM_CLIENT_ID=\$AZURE_CLIENT_ID_${SUFFIX}" >> $GITHUB_ENV
+        eval "echo ARM_TENANT_ID=\$AZURE_TENANT_ID_${SUFFIX}" >> $GITHUB_ENV
+        eval "echo ARM_SUBSCRIPTION_ID=\$AZURE_SUBSCRIPTION_ID_${SUFFIX}" >> $GITHUB_ENV
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.12.2
+        terraform_wrapper: false
+
+    - name: Install Terragrunt
+      run: |
+        curl -L "https://github.com/gruntwork-io/terragrunt/releases/download/v0.81.10/terragrunt_linux_amd64" -o terragrunt
+        chmod +x terragrunt
+        sudo mv terragrunt /usr/local/bin/
+        terragrunt --version
+
+    - name: Install Just
+      uses: extractions/setup-just@v2
+
+    - name: Terragrunt Plan
+      run: |
+        just azure-init ${{ env.ACCOUNT }} ${{ env.REGION }} ${{ env.CLUSTER }}
+        just azure-plan ${{ env.ACCOUNT }} ${{ env.REGION }} ${{ env.CLUSTER }}

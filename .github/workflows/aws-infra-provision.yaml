@@ -1,0 +1,109 @@
+name: AWS Infra Provision
+
+env:
+  PROFILE_NAME: devops-compute-ansible
+  GH_ROLE_DEV: ${{ secrets.GH_ROLE_DEV }}
+  GH_ROLE_PROD: ${{ secrets.GH_ROLE_PROD }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      account:
+        description: 'Account to deploy'
+        required: true
+        type: choice
+        options:
+          - dev
+          - stage
+        default: dev
+
+      cluster:
+        description: 'Versionmesh deployment'
+        required: true
+        type: choice
+        options:
+          - bluemesh
+        default: bluemesh
+
+      region:
+        description: 'Region to deploy'
+        required: true
+        type: choice
+        options:
+          - us-east-1
+          - us-east-2
+        default: us-east-1
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  infra-provision:
+    runs-on: ubuntu-latest
+    name: AWS Infra Provision ${{ inputs.account || 'dev' }} ${{ inputs.cluster || 'bluemesh' }}
+    env:
+      ACCOUNT: ${{ inputs.account || 'dev' }}
+      CLUSTER: ${{ inputs.cluster || 'bluemesh' }}
+      REGION: ${{ inputs.region || 'us-east-1' }}
+
+    concurrency:
+      group: aws-${{ inputs.account || 'dev' }}-${{ inputs.region || 'us-east-1' }}-${{ inputs.cluster || 'bluemesh' }}
+      cancel-in-progress: false
+
+    steps:
+
+    - uses: actions/checkout@v4
+
+    - name: Set secret name
+      id: secret-name
+      run: |
+        if [ "${{ env.ACCOUNT }}" == "dev" ]; then
+          echo "arn_role=${{ env.GH_ROLE_DEV }}" >> $GITHUB_OUTPUT
+        else
+          echo "arn_role=${{ env.GH_ROLE_PROD }}" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ steps.secret-name.outputs.arn_role }}
+        aws-region: ${{ env.REGION }}
+
+    - name: Create AWS Profile for Account Enforcement
+      run: |
+        mkdir -p ~/.aws
+        cat > ~/.aws/config << EOF
+        [profile ${{ env.PROFILE_NAME }}]
+        region = ${{ env.REGION }}
+        EOF
+
+        cat > ~/.aws/credentials << EOF
+        [${{ env.PROFILE_NAME }}]
+        aws_access_key_id = ${AWS_ACCESS_KEY_ID}
+        aws_secret_access_key = ${AWS_SECRET_ACCESS_KEY}
+        aws_session_token = ${AWS_SESSION_TOKEN}
+        EOF
+
+        aws sts get-caller-identity --profile ${{ env.PROFILE_NAME }}
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.12.2
+        terraform_wrapper: false
+
+    - name: Install Terragrunt
+      run: |
+        curl -L "https://github.com/gruntwork-io/terragrunt/releases/download/v0.81.10/terragrunt_linux_amd64" -o terragrunt
+        chmod +x terragrunt
+        sudo mv terragrunt /usr/local/bin/
+        terragrunt --version
+
+    - name: Install Just
+      uses: extractions/setup-just@v2
+
+    - name: Terragrunt Apply
+      run: |
+        just aws-init ${{ env.ACCOUNT }} ${{ env.REGION }} ${{ env.CLUSTER }}
+        just aws-apply ${{ env.ACCOUNT }} ${{ env.REGION }} ${{ env.CLUSTER }}
