@@ -130,6 +130,8 @@ Zero long-lived credentials. GitHub Actions authenticate via OIDC token exchange
 ## Active Technologies
 - HCL (Terraform 1.12.x, Terragrunt 0.81.x) + `hashicorp/aws` provider ~> 6.44, `terraform-aws-modules/vpc/aws` ~> 6.4 (001-repo-restructure-discovery)
 - S3 state backend (`compute-ansible-tg-state-{account}`) with native locking (001-repo-restructure-discovery)
+- Ansible 2.17.x (control side, on GitHub Actions); shell-installable Linux on hosts (Amazon Linux 2023 + Ubuntu LTS supported by AMI choice in `ec2-extended`) + `amazon.aws==10.*` collection, `boto3>=1.34`, `botocore>=1.34`, AWS Session Manager Plugin (003-ansible-node-exporter)
+- One small S3 bucket per (env, region) for SSM file transfer (new, provisioned by Terragrunt). No persisted application data. (003-ansible-node-exporter)
 
 ## Recent Changes
 - 001-repo-restructure-discovery: Added HCL (Terraform 1.12.x, Terragrunt 0.81.x) + `hashicorp/aws` provider ~> 6.44, `terraform-aws-modules/vpc/aws` ~> 6.4

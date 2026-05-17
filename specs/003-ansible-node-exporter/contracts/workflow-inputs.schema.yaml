@@ -1,0 +1,71 @@
+# Contract: GitHub Actions workflow_dispatch inputs
+# Workflow: .github/workflows/ansible-node-exporter.yaml
+# Spec: ../spec.md (FR-006, FR-009, FR-017, FR-018)
+# Authoritative — change this file when input schema changes; the workflow YAML
+# follows this contract.
+
+$schema: "https://json-schema.org/draft-07/schema#"
+title: AnsibleNodeExporterWorkflowInputs
+type: object
+additionalProperties: false
+required:
+  - account
+  - region
+  - versionmesh
+
+properties:
+  account:
+    type: string
+    enum: [dev, stage, prod]
+    default: dev
+    description: >
+      Target AWS account / environment. Maps to the `Account` instance tag.
+      `prod` is rejected at job start in v1 (out of spec scope).
+
+  region:
+    type: string
+    enum: [us-east-1, us-east-2]
+    default: us-east-1
+    description: Target AWS region. Maps to the `Region` instance tag and to the AWS SDK region.
+
+  versionmesh:
+    type: string
+    pattern: "^[a-z][a-z0-9-]{1,32}$"
+    default: bluemesh
+    description: >
+      Blue/green/etc slot. Maps to the `Versionmesh` instance tag. Default
+      `bluemesh` targets the existing fleet. Future slots: `greenmesh`, etc.
+
+  node_exporter_version:
+    type: string
+    pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    default: "1.10.2"
+    description: >
+      Upstream release version without leading `v`. Workflow MUST verify the
+      release tag resolves before opening any SSM sessions (HEAD against
+      sha256sums.txt of the corresponding release).
+
+  failure_threshold_pct:
+    type: integer
+    minimum: 0
+    maximum: 100
+    default: 20
+    description: >
+      Per FR-017: only consulted on `schedule` trigger. The workflow MUST
+      coerce this to 100 (strict) when the trigger is `push` or
+      `workflow_dispatch`. Any SSM-unreachable host still fails the run
+      regardless of this value.
+
+  extra_ansible_args:
+    type: string
+    default: ""
+    maxLength: 256
+    description: >
+      Passed verbatim to `ansible-playbook` for emergency scoping (e.g.
+      `--limit i-0abc...`, `--tags verify`). MUST NOT contain shell
+      metacharacters; validated against an allowlist before use.
+
+# Trigger-derived (not direct inputs) — used by exit-code.sh:
+#
+#   trigger ∈ {push, workflow_dispatch, schedule}
+#   GITHUB_EVENT_NAME maps to this value automatically.
