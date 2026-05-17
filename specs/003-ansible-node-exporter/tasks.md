@@ -36,9 +36,9 @@ This is an infrastructure / configuration-management repo, not an application re
 
 **⚠️ Execution location**: Sub-topic branch only. Do NOT add these files to `003-ansible-node-exporter`.
 
-- [ ] T001 From `003-ansible-node-exporter`, create sub-topic branch `003-ansible-node-exporter--iam-and-bucket` (`git checkout -b 003-ansible-node-exporter--iam-and-bucket`)
-- [ ] T002 [P] Create empty module directory `aws/terraform/modules/ansible-ssm-bucket/` with placeholder files: `main.tf`, `variables.tf`, `outputs.tf`, `versions.tf`
-- [ ] T003 [P] Create empty Terragrunt config directory `aws/dev/us-east-1/ansible-ssm-bucket/` containing a `terragrunt.hcl` placeholder (v1 region scope per SC-005; multi-region deferred to a follow-up sub-topic)
+- [X] T001 From `003-ansible-node-exporter`, create sub-topic branch `003-ansible-node-exporter--iam-and-bucket` (`git checkout -b 003-ansible-node-exporter--iam-and-bucket`)
+- [X] T002 [P] Create empty module directory `aws/terraform/modules/ansible-ssm-bucket/` with placeholder files: `main.tf`, `variables.tf`, `outputs.tf`, `versions.tf`
+- [X] T003 [P] Create empty Terragrunt config directory `aws/dev/us-east-1/ansible-ssm-bucket/` containing a `terragrunt.hcl` placeholder (v1 region scope per SC-005; multi-region deferred to a follow-up sub-topic)
 
 ---
 
@@ -50,19 +50,19 @@ This is an infrastructure / configuration-management repo, not an application re
 
 ### S3 staging bucket (Terraform module — for SSM file transfer)
 
-- [ ] T004 Implement S3 bucket module body in `aws/terraform/modules/ansible-ssm-bucket/main.tf`: bucket name `compute-ansible-${var.account_id}-${var.region}-ansible-ssm`, versioning **OFF**, lifecycle expiry **1 day**, block-public-access ON, SSE-S3 default encryption, and a bucket policy granting `s3:GetObject` / `s3:PutObject` / `s3:DeleteObject` / `s3:ListBucket` to the EC2 instance profile role ARN passed as `var.ec2_instance_role_arn`
-- [ ] T005 [P] Declare inputs in `aws/terraform/modules/ansible-ssm-bucket/variables.tf` (`account_id`, `region`, `ec2_instance_role_arn`, optional `tags`)
-- [ ] T006 [P] Declare outputs in `aws/terraform/modules/ansible-ssm-bucket/outputs.tf` (`bucket_name`, `bucket_arn`)
-- [ ] T007 [P] Pin providers in `aws/terraform/modules/ansible-ssm-bucket/versions.tf` matching the rest of `aws/terraform/modules/*/versions.tf`
+- [X] T004 Implement S3 bucket module body in `aws/terraform/modules/ansible-ssm-bucket/main.tf`: bucket name `compute-ansible-${var.account_id}-${var.region}-ansible-ssm`, versioning **OFF**, lifecycle expiry **1 day**, block-public-access ON, SSE-S3 default encryption, and a bucket policy granting `s3:GetObject` / `s3:PutObject` / `s3:DeleteObject` / `s3:ListBucket` to the EC2 instance profile role ARN passed as `var.ec2_instance_role_arn`
+- [X] T005 [P] Declare inputs in `aws/terraform/modules/ansible-ssm-bucket/variables.tf` (`account_id`, `region`, `ec2_instance_role_arn`, optional `tags`)
+- [X] T006 [P] Declare outputs in `aws/terraform/modules/ansible-ssm-bucket/outputs.tf` (`bucket_name`, `bucket_arn`)
+- [X] T007 [P] Pin providers in `aws/terraform/modules/ansible-ssm-bucket/versions.tf` matching the rest of `aws/terraform/modules/*/versions.tf`
 
 ### Terragrunt config (per-region — bucket lifecycle is CI-managed, not admin-only)
 
-- [ ] T008 [P] Write `aws/dev/us-east-1/ansible-ssm-bucket/terragrunt.hcl` referencing the new module, passing `account_id`, `region`, and the `ec2-extended` instance-role ARN via remote-state lookup (use the existing `dependency` pattern from neighboring `aws/dev/us-east-1/bluemesh/ec2/terragrunt.hcl`)
+- [X] T008 [P] Write `aws/dev/us-east-1/ansible-ssm-bucket/terragrunt.hcl` referencing the new module, passing `account_id`, `region`, and the `ec2-extended` instance-role ARN via remote-state lookup (use the existing `dependency` pattern from neighboring `aws/dev/us-east-1/bluemesh/ec2/terragrunt.hcl`)
 (T009 removed in F3 remediation — us-east-2 deferred to a follow-up sub-topic to match SC-005's v1 scope.)
 
 ### OIDC IAM additions (admin-only — modifies `aws/dev/shared/oidc/`)
 
-- [ ] T010 (FR-007) Open `aws/terraform/modules/oidc/main.tf` and **append** an inline policy / managed-policy attachment to the existing OIDC-assumable role that grants: `ssm:StartSession`, `ssm:SendCommand`, `ssm:DescribeInstanceInformation`, `ssm:GetCommandInvocation`, `ssm:TerminateSession`, `ec2:DescribeInstances`, `ec2:DescribeInstanceStatus`, plus `s3:GetObject`/`PutObject`/`DeleteObject`/`ListBucket` scoped to the `compute-ansible-*-ansible-ssm` bucket pattern. Do NOT remove or alter the existing `ssm:GetParameter` permission.
+- [X] T010 (FR-007) **Implemented as new file** `aws/terraform/modules/oidc/ansible-ssm-policy.tf` (rather than appending to `main.tf` — cleaner diff, easier revert). Grants the OIDC role: SSM session/command lifecycle (`ssm:StartSession`/`SendCommand`/`Describe*`/`Get*`/`Terminate*`/`Resume*`), `ssm:GetDocument`/`DescribeDocument` scoped to `AWS-RunShellScript` + `AWS-StartInteractiveCommand` only, and `ec2:Describe{Instances,InstanceStatus,Tags,Regions,AvailabilityZones}` for the dynamic inventory plugin. **S3 perms NOT duplicated** — the existing `s3_data_buckets` policy in `main.tf` already grants `s3:*` on `compute-ansible-*` buckets, which covers the new `compute-ansible-<acct>-<region>-ansible-ssm` bucket. The existing `ssm:GetParameter` permission is unchanged.
 
 ### Local apply by admin (Principle II — admin-only path)
 
