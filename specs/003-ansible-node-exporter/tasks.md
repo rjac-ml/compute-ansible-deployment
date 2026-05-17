@@ -38,7 +38,7 @@ This is an infrastructure / configuration-management repo, not an application re
 
 - [ ] T001 From `003-ansible-node-exporter`, create sub-topic branch `003-ansible-node-exporter--iam-and-bucket` (`git checkout -b 003-ansible-node-exporter--iam-and-bucket`)
 - [ ] T002 [P] Create empty module directory `aws/terraform/modules/ansible-ssm-bucket/` with placeholder files: `main.tf`, `variables.tf`, `outputs.tf`, `versions.tf`
-- [ ] T003 [P] Create empty Terragrunt config directories `aws/dev/us-east-1/ansible-ssm-bucket/` and `aws/dev/us-east-2/ansible-ssm-bucket/` each containing a `terragrunt.hcl` placeholder
+- [ ] T003 [P] Create empty Terragrunt config directory `aws/dev/us-east-1/ansible-ssm-bucket/` containing a `terragrunt.hcl` placeholder (v1 region scope per SC-005; multi-region deferred to a follow-up sub-topic)
 
 ---
 
@@ -58,15 +58,15 @@ This is an infrastructure / configuration-management repo, not an application re
 ### Terragrunt config (per-region — bucket lifecycle is CI-managed, not admin-only)
 
 - [ ] T008 [P] Write `aws/dev/us-east-1/ansible-ssm-bucket/terragrunt.hcl` referencing the new module, passing `account_id`, `region`, and the `ec2-extended` instance-role ARN via remote-state lookup (use the existing `dependency` pattern from neighboring `aws/dev/us-east-1/bluemesh/ec2/terragrunt.hcl`)
-- [ ] T009 [P] Write `aws/dev/us-east-2/ansible-ssm-bucket/terragrunt.hcl` (same content as T008 with `region = us-east-2`)
+(T009 removed in F3 remediation — us-east-2 deferred to a follow-up sub-topic to match SC-005's v1 scope.)
 
 ### OIDC IAM additions (admin-only — modifies `aws/dev/shared/oidc/`)
 
-- [ ] T010 Open `aws/terraform/modules/oidc/main.tf` and **append** an inline policy / managed-policy attachment to the existing OIDC-assumable role that grants: `ssm:StartSession`, `ssm:SendCommand`, `ssm:DescribeInstanceInformation`, `ssm:GetCommandInvocation`, `ssm:TerminateSession`, `ec2:DescribeInstances`, `ec2:DescribeInstanceStatus`, plus `s3:GetObject`/`PutObject`/`DeleteObject`/`ListBucket` scoped to the `compute-ansible-*-ansible-ssm` bucket pattern. Do NOT remove or alter the existing `ssm:GetParameter` permission.
+- [ ] T010 (FR-007) Open `aws/terraform/modules/oidc/main.tf` and **append** an inline policy / managed-policy attachment to the existing OIDC-assumable role that grants: `ssm:StartSession`, `ssm:SendCommand`, `ssm:DescribeInstanceInformation`, `ssm:GetCommandInvocation`, `ssm:TerminateSession`, `ec2:DescribeInstances`, `ec2:DescribeInstanceStatus`, plus `s3:GetObject`/`PutObject`/`DeleteObject`/`ListBucket` scoped to the `compute-ansible-*-ansible-ssm` bucket pattern. Do NOT remove or alter the existing `ssm:GetParameter` permission.
 
 ### Local apply by admin (Principle II — admin-only path)
 
-- [ ] T011 Admin applies the bucket Terragrunt configs locally: `cd aws/dev/us-east-1/ansible-ssm-bucket && terragrunt apply` and again for `us-east-2`
+- [ ] T011 Admin applies the bucket Terragrunt config locally: `cd aws/dev/us-east-1/ansible-ssm-bucket && terragrunt apply`
 - [ ] T012 Admin applies the OIDC changes locally: `cd aws/dev/shared/oidc && terragrunt apply` (this is admin-only by repo convention; the new OIDC permissions are what enable Ansible to run in CI thereafter)
 - [ ] T013 Verify the new IAM policy is attached to the OIDC role: `aws iam list-attached-role-policies --role-name <role-name-from-output>` returns the new entries; and `aws s3 ls s3://compute-ansible-<account-id>-us-east-1-ansible-ssm` succeeds with the OIDC role
 - [ ] T014 Open PR for `003-ansible-node-exporter--iam-and-bucket` → `main`, merge after admin review, then `git checkout 003-ansible-node-exporter` and `git rebase main`
@@ -84,13 +84,13 @@ This is an infrastructure / configuration-management repo, not an application re
 ### Ansible layer scaffolding (this branch — `003-ansible-node-exporter`)
 
 - [ ] T015 [P] [US1] Create `ansible/ansible.cfg` pinning `stdout_callback=yaml`, `gathering=smart`, enabling `amazon.aws.aws_ec2` and `amazon.aws.aws_ssm` plugins, `host_key_checking=False` (SSM does not use SSH keys but Ansible reads the flag), and `retry_files_enabled=False`
-- [ ] T016 [P] [US1] Create `ansible/requirements.txt` pinning `ansible-core==2.17.*`, `boto3>=1.34`, `botocore>=1.34`
-- [ ] T017 [P] [US1] Create `ansible/requirements.yml` pinning `amazon.aws==10.*` and `community.general==9.*` Galaxy collections
-- [ ] T018 [P] [US1] Create `ansible/README.md` (operator doc) covering layer purpose, local-vs-CI usage, and pointer to `quickstart.md`
+- [ ] T016 [P] [US1] (FR-008) Create `ansible/requirements.txt` pinning `ansible-core==2.17.*`, `boto3>=1.34`, `botocore>=1.34`
+- [ ] T017 [P] [US1] (FR-008) Create `ansible/requirements.yml` pinning `amazon.aws==10.*` and `community.general==9.*` Galaxy collections
+- [ ] T018 [P] [US1] (SC-004, FR-014) Create `ansible/README.md` (operator doc) covering layer purpose, local-vs-CI usage, and pointer to `quickstart.md` — this single short README MUST be sufficient to onboard a new operator to "I can re-run the reconciler" per SC-004
 
 ### Dynamic inventory (SSM-only, no SSH)
 
-- [ ] T019 [US1] Create `ansible/inventories/aws/dynamic.aws_ec2.yml` using the `amazon.aws.aws_ec2` plugin with: `regions: [us-east-1]`, `hostnames: [instance-id]` (mandatory for SSM), `filters` set to the **adapter selector** from `research.md` Finding 1 (`tag:Project=compute-ansible`, `tag:Account=dev`, `tag:Versionmesh=bluemesh`, `tag:Service=ec2-extended`, `instance-state-name=running`), `keyed_groups` by versionmesh and region, and `compose:` setting `ansible_connection=aws_ssm`, `ansible_aws_ssm_bucket_name`, `ansible_aws_ssm_region`. Selector keys MUST be overridable via `--extra-vars` per `contracts/role-interface.md`
+- [ ] T019 [US1] (FR-001, FR-002, FR-003, FR-009) Create `ansible/inventories/aws/dynamic.aws_ec2.yml` using the `amazon.aws.aws_ec2` plugin with: `regions: [us-east-1]`, `hostnames: [instance-id]` (mandatory for SSM), `filters` set to the **adapter selector** from `research.md` Finding 1 (`tag:Project=compute-ansible`, `tag:Account=dev`, `tag:Versionmesh=bluemesh`, `tag:Service=ec2-extended`, `instance-state-name=running`), `keyed_groups` by versionmesh and region, and `compose:` setting `ansible_connection=aws_ssm`, `ansible_aws_ssm_bucket_name`, `ansible_aws_ssm_region`. Selector keys MUST be overridable via `--extra-vars` per `contracts/role-interface.md`. Also pass `boto_extra_args: { retries: { max_attempts: 10, mode: adaptive } }` to handle AWS API rate-limit edge case #3 from `spec.md`
 
 ### `node_exporter` role — defaults + handlers + templates
 
@@ -104,7 +104,7 @@ This is an infrastructure / configuration-management repo, not an application re
 - [ ] T024 [US1] Create `ansible/roles/node_exporter/tasks/main.yml` that includes the five task files in order: `preflight.yml`, `user.yml`, `install.yml`, `service.yml`, `verify.yml`
 - [ ] T025 [US1] Create `ansible/roles/node_exporter/tasks/preflight.yml` — gather facts; map `ansible_architecture` (`x86_64`→`amd64`, `aarch64`→`arm64`); `fail:` with a clear message for any other architecture (per FR-010, edge-case #8); set fact `node_exporter_arch`
 - [ ] T026 [US1] Create `ansible/roles/node_exporter/tasks/user.yml` — `ansible.builtin.group` then `ansible.builtin.user` to create `node_exporter` system user/group as non-login (`shell: /usr/sbin/nologin`, `system: true`, `create_home: false`); idempotent so re-runs report `ok` (FR-005)
-- [ ] T027 [US1] Create `ansible/roles/node_exporter/tasks/install.yml` — download `sha256sums.txt` from `{{ node_exporter_download_base_url }}/v{{ node_exporter_version }}/{{ node_exporter_checksum_file }}` to a temp file; extract the entry for `node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch }}.tar.gz`; download the tarball with `ansible.builtin.get_url` passing `checksum: "sha256:<value>"` so a mismatch fails the task (FR-012); `ansible.builtin.unarchive` to a temp dir; `ansible.builtin.copy` the extracted `node_exporter` binary to `{{ node_exporter_install_dir }}/node_exporter` with `mode: 0755`, `owner: root`, `group: root`, and `force: yes` only when the on-disk binary's sha256 differs (use `creates:` or a `stat` + `when:` guard so re-runs report `ok`)
+- [ ] T027 [US1] (FR-005, FR-012) Create `ansible/roles/node_exporter/tasks/install.yml` — download `sha256sums.txt` from `{{ node_exporter_download_base_url }}/v{{ node_exporter_version }}/{{ node_exporter_checksum_file }}` to a temp file; extract the entry for `node_exporter-{{ node_exporter_version }}.linux-{{ node_exporter_arch }}.tar.gz` and `set_fact` the **expected sha256** as `node_exporter_expected_sha256`. **Version-aware idempotency guard (folds in T031):** before downloading, `stat` `{{ node_exporter_install_dir }}/node_exporter`; if present, `command: sha256sum` the on-disk binary; compare to `node_exporter_expected_sha256`. Only run the download + unarchive + copy block when the on-disk binary is missing OR its sha256 does not match the expected value. The `ansible.builtin.get_url` MUST pass `checksum: "sha256:{{ node_exporter_expected_sha256 }}"` so a mismatch fails the task (FR-012). `ansible.builtin.unarchive` to a temp dir; `ansible.builtin.copy` the extracted `node_exporter` binary to `{{ node_exporter_install_dir }}/node_exporter` with `mode: 0755`, `owner: root`, `group: root`. This task MUST notify the `restart node_exporter` handler so a binary swap triggers a service restart on the same run (covers US3 acceptance scenario US3.1)
 - [ ] T028 [US1] Create `ansible/roles/node_exporter/tasks/service.yml` — `ansible.builtin.template` rendering `node_exporter.service.j2` to `/etc/systemd/system/node_exporter.service` (notify `restart node_exporter`); `ansible.builtin.systemd` ensure `enabled: true`, `state: started`, `daemon_reload: true`
 - [ ] T029 [US1] Create `ansible/roles/node_exporter/tasks/verify.yml` — `ansible.builtin.systemd` check that the service is `active`; `ansible.builtin.uri` GET `http://127.0.0.1:{{ node_exporter_listen_port }}/metrics` expecting HTTP 200 and a body containing `node_exporter_build_info`; fail the host loudly otherwise (FR-011)
 
@@ -126,14 +126,14 @@ US2 is **mostly delivered by the design of the US1 tasks** (every `install.yml` 
 
 ### Idempotency hardening
 
-- [ ] T031 [US2] Audit `ansible/roles/node_exporter/tasks/install.yml` (T027) so the tarball download + unarchive steps are guarded with `creates:` (or equivalent `when: not <stat>.stat.exists`) — re-runs MUST NOT re-download the tarball when the on-disk binary's sha256 already matches the expected upstream sha256
+- [ ] T031 [US2] (FR-005) **Folded into T027 by F11 remediation.** T027 already implements the version-aware sha256-comparison guard directly. This task remains as a verification step: re-read `install.yml` and confirm the `when:` guard short-circuits *before* the download block when the on-disk sha256 matches `node_exporter_expected_sha256`. No code change required if T027 is correct.
 - [ ] T032 [US2] Audit `ansible/roles/node_exporter/tasks/service.yml` (T028) so the `template:` task only notifies the `restart node_exporter` handler when the rendered unit file actually changes (default `template:` behavior — verify the unit content is byte-stable across runs; no embedded timestamps, no `{{ ansible_date_time }}` in the template)
 - [ ] T033 [US2] Add a `tasks/verify.yml` (T029) post-check that records the service's `MainPID` via `systemctl show -p MainPID` and `set_fact` registers it — used as a diagnostic in logs, not as a fail condition, but makes the "PID unchanged on re-run" claim from acceptance scenario US2.1 visible
 
 ### Self-healing drift
 
-- [ ] T034 [US2] Verify `ansible/roles/node_exporter/tasks/service.yml` (T028) uses `state: started` (not `state: restarted`) so a running service is not bounced, but a stopped service IS started — this is what makes acceptance scenario US2.2 work
-- [ ] T035 [US2] Verify `ansible/roles/node_exporter/tasks/install.yml` (T027) will re-deploy the binary if it's missing on disk (the `creates:`/`stat` guard from T031 should naturally cover this — confirm via a manual `rm` + re-run during validation in Phase 6)
+- [ ] T034 [US2] (SC-003) Verify `ansible/roles/node_exporter/tasks/service.yml` (T028) uses `state: started` (not `state: restarted`) so a running service is not bounced, but a stopped service IS started — this is what makes acceptance scenario US2.2 work, and combined with the hourly `cron: "0 * * * *"` schedule (T043) is what satisfies SC-003 ("drift corrected within 1 hour")
+- [ ] T035 [US2] Verify `ansible/roles/node_exporter/tasks/install.yml` (T027) will re-deploy the binary if it's missing on disk (the `stat` guard from T027 naturally covers this case: `not stat.stat.exists` → enter the download/install block) — confirm via a manual `rm` + re-run during validation in Phase 8
 
 **Checkpoint**: US1 + US2 together form the MVP. With Phase 2 preconditions applied + Phases 3 + 4 implemented, the feature is shippable *if* invoked from a local workstation. Phase 5 wires it into CI.
 
@@ -186,10 +186,11 @@ US4 depends on the workflow being in place (Phase 5 tasks below are shared with 
 
 ### GitHub Actions workflow
 
-- [ ] T043 Create `.github/workflows/ansible-node-exporter.yaml` with: triggers `push` (paths: `ansible/**`, `.github/workflows/ansible-node-exporter.yaml`, branches: `main`), `workflow_dispatch` (inputs matching `contracts/workflow-inputs.schema.yaml`: `account`, `aws_region`, `versionmesh`, `tag_project`, `tag_account`, `tag_versionmesh`, `tag_service`, `tag_name` optional, `instance_ids` optional CSV, `node_exporter_version`, `failure_threshold_pct`), and `schedule` (`cron: "0 * * * *"` hourly). Enforce schema constraint: reject `account=prod` at job start (per data-model.md)
+- [ ] T043 (FR-006, SC-003) Create `.github/workflows/ansible-node-exporter.yaml` with: triggers `push` (paths: `ansible/**`, `.github/workflows/ansible-node-exporter.yaml`, branches: `main`), `workflow_dispatch` (inputs matching `contracts/workflow-inputs.schema.yaml`: `account`, `aws_region`, `versionmesh`, `tag_project`, `tag_account`, `tag_versionmesh`, `tag_service`, `tag_name` optional, `instance_ids` optional CSV, `node_exporter_version`, `failure_threshold_pct`), and `schedule` (`cron: "0 * * * *"` hourly — satisfies SC-003 drift correction within 1 hour). Enforce schema constraint: reject `account=prod` at job start (per data-model.md)
 - [ ] T044 In the same workflow, declare the `concurrency` block: `group: ansible-node-exporter-${{ inputs.account || 'dev' }}-${{ inputs.aws_region || 'us-east-1' }}-${{ inputs.versionmesh || 'bluemesh' }}`, `cancel-in-progress: false` (per FR-018 + plan.md §Decision 8)
-- [ ] T045 In the same workflow, declare permissions `id-token: write` and `contents: read` for OIDC; assume role via `aws-actions/configure-aws-credentials@v4` using secret `GH_ROLE_DEV` and `PROFILE_NAME: devops-compute-ansible` (matching existing workflows per `research.md` Finding "Existing repo patterns to mirror")
-- [ ] T046 In the same workflow, install AWS Session Manager Plugin on the runner (`curl ... session-manager-plugin.deb && dpkg -i`), then run `just ansible-setup`, `just ansible-check dev us-east-1 bluemesh`, and (for non-dry-run triggers) `just ansible-apply dev us-east-1 bluemesh` piping JSON callback output to a file. Final step invokes `ansible/scripts/exit-code.sh` (T042) with the callback file + event name + threshold
+- [ ] T045 (FR-007) In the same workflow, declare permissions `id-token: write` and `contents: read` for OIDC; assume role via `aws-actions/configure-aws-credentials@v4` using secret `GH_ROLE_DEV` and `PROFILE_NAME: devops-compute-ansible` (matching existing workflows per `research.md` Finding "Existing repo patterns to mirror"). No static AWS access keys are introduced (FR-007, SC-006)
+- [ ] T046a (FR-008) In the same workflow, add a discrete step that installs the AWS Session Manager Plugin on the runner: `curl https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb -o /tmp/session-manager-plugin.deb && sudo dpkg -i /tmp/session-manager-plugin.deb && session-manager-plugin --version`. This is a hard requirement for `amazon.aws.aws_ssm` to function.
+- [ ] T046b In the same workflow, run `just ansible-setup`, `just ansible-check dev us-east-1 bluemesh`, and (for non-dry-run triggers) `just ansible-apply dev us-east-1 bluemesh` piping JSON callback output to a file. Final step invokes `ansible/scripts/exit-code.sh` (T042) with the callback file + event name + threshold
 - [ ] T047 [US4] Wire `workflow_dispatch` inputs into the `just ansible-apply` invocation as `--extra-vars` overrides (T039) — when `tag_name` or `instance_ids` is set, narrow the inventory; when `node_exporter_version` is set, override the role default. Document the inputs in the workflow file's `description:` fields so the GH Actions UI is self-explanatory
 
 **Checkpoint**: The feature is fully CI-driven. Push to `main` triggers a run; hourly schedule reconciles; manual dispatch supports scoped runs (US4).
@@ -202,8 +203,8 @@ US4 depends on the workflow being in place (Phase 5 tasks below are shared with 
 
 - [ ] T048 [P] Run `just ansible-check dev us-east-1 bluemesh` locally; fix any `ansible-lint` warnings; verify `--syntax-check` clean
 - [ ] T049 [P] Run `just ansible-plan dev us-east-1 bluemesh` locally against a real bluemesh dev fleet (after Phase 2 preconditions are merged); capture the `--check --diff` output and paste into the PR description as "dry-run evidence"
-- [ ] T050 Trigger the workflow via `gh workflow run ansible-node-exporter.yaml -f account=dev -f aws_region=us-east-1 -f versionmesh=bluemesh`; verify it converges per `quickstart.md` AT-1 through AT-9
-- [ ] T051 Run a **second** `workflow_dispatch` immediately after T050 succeeds; verify the workflow summary shows `changed=0` for every host (proves US2 / SC-002)
+- [ ] T050 (SC-001, SC-005) Trigger the workflow via `gh workflow run ansible-node-exporter.yaml -f account=dev -f aws_region=us-east-1 -f versionmesh=bluemesh`; verify it converges per `quickstart.md` AT-1 through AT-9. **Record wall-clock duration** from workflow start to green: assert ≤ 5 min for a single-host run (SC-001) and ≤ 10 min for a ≥25-host fleet (SC-005). If either threshold is exceeded, file a follow-up sub-topic before declaring v1 done.
+- [ ] T051 (SC-002) Run a **second** `workflow_dispatch` immediately after T050 succeeds; verify the workflow summary shows `changed=0` for every host (proves US2 / SC-002)
 - [ ] T052 Manually break one host (`aws ssm send-command ... 'systemctl stop node_exporter'`), wait for the next hourly schedule tick (or dispatch manually), verify the workflow exits **green** because only 1/N hosts is broken and N ≥ 5 (proves SC-007 + FR-017 schedule semantics); then verify the broken host is healed by the same run
 - [ ] T053 [P] Update root `README.md` (or repo-level docs) with a one-line pointer to `ansible/README.md` and to `specs/003-ansible-node-exporter/quickstart.md`
 - [ ] T054 [P] Run `.specify/scripts/bash/update-agent-context.sh claude` to refresh `CLAUDE.md` with the Ansible layer entries
@@ -241,7 +242,7 @@ US4 depends on the workflow being in place (Phase 5 tasks below are shared with 
 ### Parallel Opportunities
 
 - **Phase 1**: T002 and T003 are independent (different paths).
-- **Phase 2**: T005, T006, T007 parallel after T004 lands the module skeleton; T008/T009 parallel (different region paths).
+- **Phase 2**: T005, T006, T007 parallel after T004 lands the module skeleton. (T008 is the only Terragrunt config in v1 — us-east-2 deferred per F3 remediation.)
 - **Phase 3**: T015, T016, T017, T018 all parallel (different files). T020, T021, T022, T023 parallel (different files within role scaffolding). T024–T029 are sequential (`main.yml` imports the others in order).
 - **Phase 8**: T048, T049, T053, T054 parallel (different concerns / different files).
 

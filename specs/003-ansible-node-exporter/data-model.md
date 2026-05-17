@@ -11,7 +11,7 @@ Configuration-management features don't carry traditional persisted entities; th
 | Field | Type | Required | Default | Constraints | Source |
 | --- | --- | --- | --- | --- | --- |
 | `account` | enum | yes | `dev` | one of `{dev, stage, prod}` | input |
-| `region` | enum | yes | `us-east-1` | one of `{us-east-1, us-east-2}` | input |
+| `region` | enum | yes | `us-east-1` | `us-east-1` only in v1 (matches SC-005 scope); future sub-topic may extend the enum | input |
 | `versionmesh` | string | yes | `bluemesh` | matches an existing Terragrunt path `aws/<account>/<region>/<versionmesh>/ec2` | input |
 | `node_exporter_version` | string | no | `1.10.2` | matches a published release tag at github.com/prometheus/node_exporter (no leading `v`) | input |
 | `failure_threshold_pct` | integer | no | `20` | 0–100 inclusive; only consulted on `schedule` trigger | input |
