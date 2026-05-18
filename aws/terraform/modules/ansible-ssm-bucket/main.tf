@@ -12,7 +12,10 @@
 #     payloads and complicates the SSM agent's IAM grant.
 
 locals {
-  bucket_name = "compute-ansible-${var.account_id}-${var.region}-ansible-ssm"
+  # One bucket per (account, region, versionmesh). Blue/green cutovers keep
+  # their staging surfaces independent; each mesh's instance-profile role
+  # only ever sees its own bucket.
+  bucket_name = "compute-ansible-${var.account_id}-${var.region}-${var.versionmesh}-ansible-ssm"
 }
 
 resource "aws_s3_bucket" "ssm_staging" {

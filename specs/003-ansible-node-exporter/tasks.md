@@ -38,7 +38,7 @@ This is an infrastructure / configuration-management repo, not an application re
 
 - [X] T001 From `003-ansible-node-exporter`, create sub-topic branch `003-ansible-node-exporter--iam-and-bucket` (`git checkout -b 003-ansible-node-exporter--iam-and-bucket`)
 - [X] T002 [P] Create empty module directory `aws/terraform/modules/ansible-ssm-bucket/` with placeholder files: `main.tf`, `variables.tf`, `outputs.tf`, `versions.tf`
-- [X] T003 [P] Create empty Terragrunt config directory `aws/dev/us-east-1/ansible-ssm-bucket/` containing a `terragrunt.hcl` placeholder (v1 region scope per SC-005; multi-region deferred to a follow-up sub-topic)
+- [X] T003 [P] Create Terragrunt config inside the bluemesh versionmesh tier: `aws/dev/us-east-1/bluemesh/ansible-ssm-bucket/terragrunt.hcl`. **Versionmesh-scoped, not region-shared** — one bucket per `(account, region, versionmesh)`, picked up automatically by the existing `aws-infra-provision.yaml` workflow which walks `aws/<acct>/<region>/<versionmesh>/`. Greenmesh, when it lands, gets its own sibling bucket by copying this file. (v1 region scope per SC-005.)
 
 ---
 
@@ -50,28 +50,30 @@ This is an infrastructure / configuration-management repo, not an application re
 
 ### S3 staging bucket (Terraform module — for SSM file transfer)
 
-- [X] T004 Implement S3 bucket module body in `aws/terraform/modules/ansible-ssm-bucket/main.tf`: bucket name `compute-ansible-${var.account_id}-${var.region}-ansible-ssm`, versioning **OFF**, lifecycle expiry **1 day**, block-public-access ON, SSE-S3 default encryption, and a bucket policy granting `s3:GetObject` / `s3:PutObject` / `s3:DeleteObject` / `s3:ListBucket` to the EC2 instance profile role ARN passed as `var.ec2_instance_role_arn`
-- [X] T005 [P] Declare inputs in `aws/terraform/modules/ansible-ssm-bucket/variables.tf` (`account_id`, `region`, `ec2_instance_role_arn`, optional `tags`)
+- [X] T004 Implement S3 bucket module body in `aws/terraform/modules/ansible-ssm-bucket/main.tf`: bucket name `compute-ansible-${var.account_id}-${var.region}-${var.versionmesh}-ansible-ssm`, versioning **OFF**, lifecycle expiry **1 day**, block-public-access ON, SSE-S3 default encryption, and a bucket policy granting `s3:GetObject` / `s3:PutObject` / `s3:DeleteObject` / `s3:ListBucket` to the EC2 instance profile role ARN passed as `var.ec2_instance_role_arn`
+- [X] T005 [P] Declare inputs in `aws/terraform/modules/ansible-ssm-bucket/variables.tf` (`account_id`, `region`, `versionmesh`, `ec2_instance_role_arn`, optional `tags`)
 - [X] T006 [P] Declare outputs in `aws/terraform/modules/ansible-ssm-bucket/outputs.tf` (`bucket_name`, `bucket_arn`)
 - [X] T007 [P] Pin providers in `aws/terraform/modules/ansible-ssm-bucket/versions.tf` matching the rest of `aws/terraform/modules/*/versions.tf`
 
 ### Terragrunt config (per-region — bucket lifecycle is CI-managed, not admin-only)
 
-- [X] T008 [P] Write `aws/dev/us-east-1/ansible-ssm-bucket/terragrunt.hcl` referencing the new module, passing `account_id`, `region`, and the `ec2-extended` instance-role ARN via remote-state lookup (use the existing `dependency` pattern from neighboring `aws/dev/us-east-1/bluemesh/ec2/terragrunt.hcl`)
+- [X] T008 [P] Write `aws/dev/us-east-1/bluemesh/ansible-ssm-bucket/terragrunt.hcl` referencing the new module, passing `account_id`, `region`, `versionmesh` (from `include.root.locals.versionmesh`), and the `ec2-extended` instance-role ARN via a `dependency "ec2"` block pointing at `../ec2` (same versionmesh). Greenmesh sibling at `aws/dev/us-east-1/greenmesh/ansible-ssm-bucket/` is a future copy of this file.
 (T009 removed in F3 remediation — us-east-2 deferred to a follow-up sub-topic to match SC-005's v1 scope.)
 
 ### OIDC IAM additions (admin-only — modifies `aws/dev/shared/oidc/`)
 
 - [X] T010 (FR-007) **Implemented as new file** `aws/terraform/modules/oidc/ansible-ssm-policy.tf` (rather than appending to `main.tf` — cleaner diff, easier revert). Grants the OIDC role: SSM session/command lifecycle (`ssm:StartSession`/`SendCommand`/`Describe*`/`Get*`/`Terminate*`/`Resume*`), `ssm:GetDocument`/`DescribeDocument` scoped to `AWS-RunShellScript` + `AWS-StartInteractiveCommand` only, and `ec2:Describe{Instances,InstanceStatus,Tags,Regions,AvailabilityZones}` for the dynamic inventory plugin. **S3 perms NOT duplicated** — the existing `s3_data_buckets` policy in `main.tf` already grants `s3:*` on `compute-ansible-*` buckets, which covers the new `compute-ansible-<acct>-<region>-ansible-ssm` bucket. The existing `ssm:GetParameter` permission is unchanged.
 
-### Local apply by admin (Principle II — admin-only path)
+### Apply: CI for the bucket, one-shot admin-local for OIDC
 
-- [ ] T011 Admin applies the bucket Terragrunt config locally: `cd aws/dev/us-east-1/ansible-ssm-bucket && terragrunt apply`
-- [ ] T012 Admin applies the OIDC changes locally: `cd aws/dev/shared/oidc && terragrunt apply` (this is admin-only by repo convention; the new OIDC permissions are what enable Ansible to run in CI thereafter)
-- [ ] T013 Verify the new IAM policy is attached to the OIDC role: `aws iam list-attached-role-policies --role-name <role-name-from-output>` returns the new entries; and `aws s3 ls s3://compute-ansible-<account-id>-us-east-1-ansible-ssm` succeeds with the OIDC role
-- [ ] T014 Open PR for `003-ansible-node-exporter--iam-and-bucket` → `main`, merge after admin review, then `git checkout 003-ansible-node-exporter` and `git rebase main`
+**Repo convention**: only **trust roots** (things CI can't apply because CI assumes them — e.g. the OIDC role itself) are admin-applied locally. **Everything else, including the SSM staging bucket, applies through GitHub Actions** and MUST be idempotent (`terragrunt apply` produces `0 to add, 0 to change, 0 to destroy` on re-run against converged state).
 
-**Checkpoint**: Preconditions are live in AWS dev. The Ansible layer can now be built on `003-ansible-node-exporter`.
+- [ ] T011 Apply the SSM staging bucket **through CI**: trigger `aws-infra-provision.yaml` via `gh workflow run aws-infra-provision.yaml -f account=dev -f region=us-east-1 -f cluster=bluemesh`. The existing workflow walks `aws/dev/us-east-1/bluemesh/` and picks up the new `ansible-ssm-bucket/` unit alongside `ec2/` and `vpc/`. No new workflow, no new `just` recipe, no manual `terragrunt apply` needed. **Idempotency check**: re-run the workflow immediately after the first success and confirm `0 to add, 0 to change, 0 to destroy` on the bucket plan.
+- [ ] T012 (Trust root — admin-local) Admin applies the OIDC changes once: `cd aws/dev/shared/oidc && terragrunt apply`. This is the one exception to the CI-driven rule because the OIDC role is what CI assumes — chicken-and-egg. After this single bootstrap, no further local `terragrunt apply` is needed for this feature.
+- [ ] T013 Verify (local, after the CI run + admin apply complete): `aws iam list-role-policies --role-name <github-actions-role>` includes `ansible-ssm`; `aws s3 ls s3://compute-ansible-<account-id>-us-east-1-bluemesh-ansible-ssm/` succeeds (empty bucket exists). The role name comes from the OIDC module output.
+- [ ] T014 Open PR for `003-ansible-node-exporter--iam-and-bucket` → `main` as a draft, mark ready after T013 passes, merge, then `git checkout 003-ansible-node-exporter` and `git rebase main`
+
+**Checkpoint**: Preconditions are live in AWS dev (bucket via CI, OIDC via one-shot admin apply). The Ansible layer can now be built on `003-ansible-node-exporter`. Greenmesh, if/when introduced later, gets its own bucket by copying the `bluemesh/ansible-ssm-bucket/` terragrunt.hcl one directory over — no module or policy changes.
 
 ---
 
